@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>HKO Synchronized PiP Timer</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: #0d1117;
+      color: #f0f6fc;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 20px;
+    }
+    h1 { font-size: 1.2rem; color: #8b949e; margin-bottom: 20px; text-transform: uppercase; letter-spacing: 1px; }
+    canvas {
+      width: 100%;
+      max-width: 480px;
+      border-radius: 16px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+      background: #161b22;
+    }
+    .controls { margin-top: 30px; display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+    button {
+      background: #238636;
+      color: white;
+      border: none;
+      padding: 14px 24px;
+      font-size: 1rem;
+      font-weight: 600;
+      border-radius: 12px;
+      cursor: pointer;
+      box-shadow: 0 4px 12px rgba(35, 134, 54, 0.3);
+    }
+    button.sync { background: #1f6feb; box-shadow: 0 4px 12px rgba(31, 111, 235, 0.3); }
+    video { display: none; } /* Kept hidden; used solely for PiP stream */
+    .status { margin-top: 15px; font-size: 0.85rem; color: #8b949e; text-align: center; }
+  </style>
+</head>
+<body>
+
+  <h1>HK Time Sync Clock</h1>
+  <canvas id="timerCanvas" width="600" height="300"></canvas>
+  <video id="pipVideo" autoplay playsinline muted></video>
+
+  <div class="controls">
+    <button class="sync" onclick="syncHKTime()">Sync HKO Time</button>
+    <button onclick="startPiP()">Open Picture-in-Picture</button>
+  </div>
+  <div class="status" id="statusLog">Initializing clock engine...</div>
+
+  <script>
+    const canvas = document.getElementById('timerCanvas');
+    const ctx = canvas.getContext('2d');
+    const video = document.getElementById('pipVideo');
+    const statusLog = document.getElementById('statusLog');
+
+    let timeOffsetMs = 0; // Difference between local hardware clock and HK Time
+
+    // 1. Time Synchronization Logic (Calculates network round-trip delay)
+    async function syncHKTime() {
+      statusLog.innerText = "Synchronizing with HK time server...";
+      try {
+        const t0 = performance.now();
+        // Using WorldTimeAPI configured for Asia/Hong_Kong timezone
+        const response = await fetch('https://worldtimeapi.org/api/timezone/Asia/Hong_Kong');
+        const t1 = performance.now();
+        const data = await response.json();
+        
+        const serverTime = new Date(data.datetime).getTime();
+        const latency = (t1 - t0) / 2; // Approximate half round-trip latency
+        const actualHKTime = serverTime + latency;
+
+        // Calculate discrepancy against device system clock
+        timeOffsetMs = actualHKTime - Date.now();
+        statusLog.innerText = `Synced! Offset: ${timeOffsetMs.toFixed(0)} ms (Latency: ${latency.toFixed(0)} ms)`;
+      } catch (err) {
+        statusLog.innerText = "Network sync failed. Falling back to local device time.";
+      }
+    }
+
+    // 2. Render Loop (Formats digital time as HH:MM:SS:FF at 60 FPS)
+    function render() {
+      const now = new Date(Date.now() + timeOffsetMs);
+
+      const hh = String(now.getHours()).padStart(2, '0');
+      const mm = String(now.getMinutes()).padStart(2, '0');
+      const ss = String(now.getSeconds()).padStart(2, '0');
+      
+      // Calculate Frame Count (00-59 frames based on 60 FPS standard)
+      const ms = now.getMilliseconds();
+      const ff = String(Math.floor((ms / 1000) * 60)).padStart(2, '0');
+
+      // Clear Canvas
+      ctx.fillStyle = '#161b22';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Render Primary Digits
+      ctx.fillStyle = '#58a6ff';
+      ctx.font = 'bold 64px -apple-system, monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(`${hh}:${mm}:${ss}:${ff}`, canvas.width / 2, canvas.height / 2 - 10);
+
+      // Render Sub-Label
+      ctx.fillStyle = '#8b949e';
+      ctx.font = '18px -apple-system, sans-serif';
+      ctx.fillText('HKT (UTC+8) • 60 FPS', canvas.width / 2, canvas.height / 2 + 55);
+
+      requestAnimationFrame(render);
+    }
+
+    // 3. Picture-in-Picture Handler
+    async function startPiP() {
+      try {
+        if (!video.srcObject) {
+          // Stream the canvas stream into the video element
+          const stream = canvas.captureStream(60);
+          video.srcObject = stream;
+          await video.play();
+        }
+        if (document.pictureInPictureElement) {
+          await document.exitPictureInPicture();
+        } else {
+          await video.requestPictureInPicture();
+        }
+      } catch (err) {
+        alert("Picture-in-Picture failed: " + err.message + "\nEnsure you interact with the page first.");
+      }
+    }
+
+    // Initialize
+    syncHKTime();
+    render();
+  </script>
+</body>
+</html>
