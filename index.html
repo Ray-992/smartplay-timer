@@ -22,6 +22,8 @@
       justify-content: center;
       min-height: 100vh;
       padding: 20px;
+      position: relative;
+      overflow: hidden;
     }
     h1 {
       font-size: 1.2rem;
@@ -38,6 +40,7 @@
       box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
       background: #161b22;
       display: block;
+      z-index: 2;
     }
     .controls {
       margin-top: 30px;
@@ -45,6 +48,7 @@
       gap: 12px;
       flex-wrap: wrap;
       justify-content: center;
+      z-index: 2;
     }
     button {
       background: #238636;
@@ -61,21 +65,25 @@
       background: #1f6feb;
       box-shadow: 0 4px 12px rgba(31, 111, 235, 0.3);
     }
-    /* iOS Offscreen Video Element */
-    video {
-      width: 1px;
-      height: 1px;
-      opacity: 0.01;
+    
+    /* FIX: Keep the video element in active layout with physical size, but make it invisible */
+    video#pipVideo {
       position: absolute;
-      top: -9999px;
-      left: -9999px;
+      top: 0;
+      left: 0;
+      width: 320px;
+      height: 160px;
+      opacity: 0.001; /* Prevents iOS from suspending frame composition */
       pointer-events: none;
+      z-index: 1;
     }
+
     .status {
       margin-top: 15px;
       font-size: 0.85rem;
       color: #8b949e;
       text-align: center;
+      z-index: 2;
     }
   </style>
 </head>
@@ -84,6 +92,8 @@
   <h1>HK Time Sync Clock</h1>
   
   <canvas id="timerCanvas" width="600" height="300"></canvas>
+  
+  <!-- Video stream element kept active in viewport -->
   <video id="pipVideo" autoplay playsinline muted></video>
 
   <div class="controls">
@@ -102,7 +112,7 @@
     let timeOffsetMs = 0;
     let isStreamReady = false;
 
-    // 1. High-Precision Time Sync Engine
+    // 1. Precise Time Sync Engine
     async function syncHKTime() {
       statusLog.innerText = "Calibrating time sync with server...";
       const endpoint = 'https://worldtimeapi.org/api/timezone/Asia/Hong_Kong'; 
@@ -113,7 +123,7 @@
         try {
           const t0 = performance.now();
           const response = await fetch(`${endpoint}?t=${Date.now()}_${i}`, { cache: "no-store" });
-          if (!response.ok) throw new Error("HTTP response error");
+          if (!response.ok) throw new Error("Network error");
           
           const t1 = performance.now();
           const data = await response.json();
@@ -142,7 +152,7 @@
       }
     }
 
-    // 2. Continuous 60 FPS Render Loop
+    // 2. High-Precision Frame Render Engine
     function render() {
       const exactNowMs = Date.now() + timeOffsetMs;
       const now = new Date(exactNowMs);
@@ -155,18 +165,18 @@
       const frameNumber = Math.floor(ms / (1000 / 60)); 
       const ff = String(Math.min(59, Math.max(0, frameNumber))).padStart(2, '0');
 
-      // Clear Canvas Background
+      // Clear Canvas Frame
       ctx.fillStyle = '#161b22';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      // Main Digital Clock Format
+      // Render Primary Digits
       ctx.fillStyle = '#58a6ff';
       ctx.font = 'bold 58px Courier, Courier New, monospace';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(`${hh}:${mm}:${ss}:${ff}`, canvas.width / 2, canvas.height / 2 - 10);
 
-      // Secondary Text Frame
+      // Subtext
       ctx.fillStyle = '#8b949e';
       ctx.font = '16px -apple-system, sans-serif';
       ctx.fillText('HKT (UTC+8) • 60 FPS Engine', canvas.width / 2, canvas.height / 2 + 55);
@@ -174,23 +184,25 @@
       requestAnimationFrame(render);
     }
 
-    // 3. Initialize Video Stream Engine
+    // 3. Initialize Media Stream
     async function initStream() {
       try {
         if (!isStreamReady) {
+          // Capture canvas stream at 60 FPS
           const stream = canvas.captureStream(60);
           video.srcObject = stream;
           await video.play();
           isStreamReady = true;
         }
       } catch (e) {
-        console.warn("Stream awaiting user gesture:", e);
+        console.warn("Stream init waiting for user gesture:", e);
       }
     }
 
-    // 4. Picture-in-Picture Control
+    // 4. Picture-in-Picture Trigger
     async function togglePiP() {
       try {
+        // Ensure stream is running and initialized
         if (!isStreamReady || video.paused) {
           await initStream();
         }
@@ -205,7 +217,7 @@
       }
     }
 
-    // Start rendering immediately
+    // Execution sequence
     render();
     initStream();
     syncHKTime();
