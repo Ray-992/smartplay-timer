@@ -43,9 +43,9 @@
       z-index: 2;
     }
     .controls {
-      margin-top: 30px;
+      margin-top: 25px;
       display: flex;
-      gap: 12px;
+      gap: 10px;
       flex-wrap: wrap;
       justify-content: center;
       z-index: 2;
@@ -54,19 +54,27 @@
       background: #238636;
       color: white;
       border: none;
-      padding: 14px 24px;
-      font-size: 1rem;
+      padding: 12px 20px;
+      font-size: 0.95rem;
       font-weight: 600;
       border-radius: 12px;
       cursor: pointer;
       box-shadow: 0 4px 12px rgba(35, 134, 54, 0.3);
+      transition: transform 0.1s ease;
+    }
+    button:active {
+      transform: scale(0.96);
     }
     button.sync {
       background: #1f6feb;
       box-shadow: 0 4px 12px rgba(31, 111, 235, 0.3);
     }
+    button.test {
+      background: #d29922;
+      box-shadow: 0 4px 12px rgba(210, 153, 34, 0.3);
+    }
     
-    /* Offscreen, layout-active video element for iOS PiP hardware compositing */
+    /* Layout-active video element for iOS PiP hardware compositing */
     video#pipVideo {
       position: absolute;
       top: 0;
@@ -96,6 +104,7 @@
   <video id="pipVideo" autoplay playsinline muted></video>
 
   <div class="controls">
+    <button class="test" onclick="captureTestTimestamp()">Capture Time (5s)</button>
     <button class="sync" onclick="syncHKTime()">Sync HKO Time</button>
     <button onclick="togglePiP()">Open Picture-in-Picture</button>
   </div>
@@ -110,6 +119,10 @@
 
     let timeOffsetMs = 0;
     let isStreamReady = false;
+
+    // Test capture state variables
+    let capturedTimeString = null;
+    let testClearTimeout = null;
 
     // 1. Precise Time Sync Engine
     async function syncHKTime() {
@@ -151,54 +164,89 @@
       }
     }
 
-    // 2. Continuous Render Engine with Alert Logic
+    // 2. Capture Exact Click Timestamp for 5 Seconds
+    function captureTestTimestamp() {
+      const clickTimeMs = Date.now() + timeOffsetMs;
+      const clickedDate = new Date(clickTimeMs);
+
+      const hh = String(clickedDate.getHours()).padStart(2, '0');
+      const mm = String(clickedDate.getMinutes()).padStart(2, '0');
+      const ss = String(clickedDate.getSeconds()).padStart(2, '0');
+      const ms = String(clickedDate.getMilliseconds()).padStart(3, '0');
+
+      capturedTimeString = `${hh}:${mm}:${ss}:${ms}`;
+      statusLog.innerText = `Captured Click Time: ${capturedTimeString}`;
+
+      // Reset timer if clicked again within 5s
+      if (testClearTimeout) clearTimeout(testClearTimeout);
+
+      testClearTimeout = setTimeout(() => {
+        capturedTimeString = null;
+        statusLog.innerText = "Resumed live clock.";
+      }, 5000);
+    }
+
+    // 3. Continuous Render Loop
     function render() {
       const exactNowMs = Date.now() + timeOffsetMs;
       const now = new Date(exactNowMs);
 
-      const hh = String(now.getHours()).padStart(2, '0');
-      const mm = String(now.getMinutes()).padStart(2, '0');
-      const ss = String(now.getSeconds()).padStart(2, '0');
-      const ms = String(now.getMilliseconds()).padStart(3, '0');
-
-      // Check if time falls within the 5-second window starting at :59.500
-      // Red Window Range: 59,500ms to 59,999ms OF current minute OR 00,000ms to 04,499ms OF next minute
       const secondsNum = now.getSeconds();
       const msNum = now.getMilliseconds();
       
+      // Check for 5-second red alert window starting at xx:mm:59:500
       const isRedAlert = (secondsNum === 59 && msNum >= 500) || (secondsNum < 4) || (secondsNum === 4 && msNum < 500);
 
-      // Color Theme Selection
-      const primaryColor = isRedAlert ? '#ff4d4d' : '#58a6ff';
-      const glowColor = isRedAlert ? 'rgba(255, 77, 77, 0.4)' : 'rgba(88, 166, 255, 0.2)';
-
-      // Clear Canvas Frame
+      // Clear Canvas Background
       ctx.fillStyle = '#161b22';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      // Optional Alert Glow Border on Canvas
-      if (isRedAlert) {
-        ctx.strokeStyle = primaryColor;
-        ctx.lineWidth = 8;
+      if (capturedTimeString) {
+        // --- DISPLAY FROZEN TEST TIMESTAMP ---
+        ctx.strokeStyle = '#d29922';
+        ctx.lineWidth = 6;
         ctx.strokeRect(4, 4, canvas.width - 8, canvas.height - 8);
+
+        ctx.fillStyle = '#f2cc60';
+        ctx.font = 'bold 52px Courier, Courier New, monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(capturedTimeString, canvas.width / 2, canvas.height / 2 - 10);
+
+        ctx.fillStyle = '#d29922';
+        ctx.font = 'bold 16px -apple-system, sans-serif';
+        ctx.fillText('TIMESTAMP CAPTURED (5s HOLD)', canvas.width / 2, canvas.height / 2 + 55);
+
+      } else {
+        // --- DISPLAY LIVE SYNCHRONIZED CLOCK ---
+        const hh = String(now.getHours()).padStart(2, '0');
+        const mm = String(now.getMinutes()).padStart(2, '0');
+        const ss = String(now.getSeconds()).padStart(2, '0');
+        const ms = String(now.getMilliseconds()).padStart(3, '0');
+
+        const primaryColor = isRedAlert ? '#ff4d4d' : '#58a6ff';
+
+        if (isRedAlert) {
+          ctx.strokeStyle = primaryColor;
+          ctx.lineWidth = 8;
+          ctx.strokeRect(4, 4, canvas.width - 8, canvas.height - 8);
+        }
+
+        ctx.fillStyle = primaryColor;
+        ctx.font = 'bold 52px Courier, Courier New, monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(`${hh}:${mm}:${ss}:${ms}`, canvas.width / 2, canvas.height / 2 - 10);
+
+        ctx.fillStyle = isRedAlert ? '#ff9999' : '#8b949e';
+        ctx.font = '16px -apple-system, sans-serif';
+        ctx.fillText('HKT (UTC+8) • High-Precision Timer', canvas.width / 2, canvas.height / 2 + 55);
       }
-
-      // Render Time String (hh:mm:ss:SSS)
-      ctx.fillStyle = primaryColor;
-      ctx.font = 'bold 52px Courier, Courier New, monospace';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(`${hh}:${mm}:${ss}:${ms}`, canvas.width / 2, canvas.height / 2 - 10);
-
-      // Subtext
-      ctx.fillStyle = isRedAlert ? '#ff9999' : '#8b949e';
-      ctx.font = '16px -apple-system, sans-serif';
-      ctx.fillText('HKT (UTC+8) • High-Precision Timer', canvas.width / 2, canvas.height / 2 + 55);
 
       requestAnimationFrame(render);
     }
 
-    // 3. Initialize Media Stream Pipeline
+    // 4. Initialize Media Stream Pipeline
     async function initStream() {
       try {
         if (!isStreamReady) {
@@ -208,11 +256,11 @@
           isStreamReady = true;
         }
       } catch (e) {
-        console.warn("Stream init waiting for user action:", e);
+        console.warn("Stream init waiting for user gesture:", e);
       }
     }
 
-    // 4. Picture-in-Picture Control
+    // 5. Picture-in-Picture Control
     async function togglePiP() {
       try {
         if (!isStreamReady || video.paused) {
