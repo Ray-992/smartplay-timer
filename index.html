@@ -1,120 +1,214 @@
-<script>
-  const canvas = document.getElementById('timerCanvas');
-  const ctx = canvas.getContext('2d');
-  const video = document.getElementById('pipVideo');
-  const statusLog = document.getElementById('statusLog');
-
-  let timeOffsetMs = 0;
-  let isStreamReady = false;
-
-  // 1. High-Precision Time Sync Engine (Multi-Sample Cristian's Algorithm)
-  async function syncHKTime() {
-    statusLog.innerText = "Calibrating precision sync with HK servers...";
-    
-    // Public NTP-over-HTTP fallback endpoint with low latency in East Asia
-    const endpoint = 'https://worldtimeapi.org/api/timezone/Asia/Hong_Kong'; 
-    const samples = [];
-    const NUM_SAMPLES = 5;
-
-    for (let i = 0; i < NUM_SAMPLES; i++) {
-      try {
-        const t0 = performance.now();
-        const response = await fetch(`${endpoint}?t=${Date.now()}_${i}`, { cache: "no-store" });
-        const t1 = performance.now();
-        const data = await response.json();
-
-        const serverTime = new Date(data.datetime).getTime();
-        const rtt = t1 - t0;
-        const latency = rtt / 2;
-
-        samples.push({
-          offset: (serverTime + latency) - Date.now(),
-          rtt: rtt
-        });
-      } catch (err) {
-        console.warn("Sample failed:", err);
-      }
-      // Brief pause between requests to prevent network queuing
-      await new Promise(res => setTimeout(res, 80));
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>HKO Synchronized PiP Timer</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
     }
-
-    if (samples.length > 0) {
-      // Pick the sample with the absolute lowest Round Trip Time (RTT)
-      samples.sort((a, b) => a.rtt - b.rtt);
-      const bestSample = samples[0];
-      
-      timeOffsetMs = bestSample.offset;
-      statusLog.innerText = `Synced! RTT: ${bestSample.rtt.toFixed(1)}ms | Offset: ${timeOffsetMs.toFixed(1)}ms`;
-    } else {
-      statusLog.innerText = "Sync failed. Operating on internal device clock.";
+    body {
+      background-color: #0d1117;
+      color: #f0f6fc;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 20px;
     }
-  }
-
-  // 2. Stable 60 FPS Render Engine (Eliminates Jitter/Shakiness)
-  function render() {
-    // High precision timestamp including current offset
-    const exactNowMs = Date.now() + timeOffsetMs;
-    const now = new Date(exactNowMs);
-
-    const hh = String(now.getHours()).padStart(2, '0');
-    const mm = String(now.getMinutes()).padStart(2, '0');
-    const ss = String(now.getSeconds()).padStart(2, '0');
-    
-    // Exact Frame Calculation (60 FPS = 16.666ms per frame)
-    const ms = now.getMilliseconds();
-    const frameNumber = Math.floor(ms / (1000 / 60)); 
-    const ff = String(Math.min(59, frameNumber)).padStart(2, '0');
-
-    // Clear Canvas
-    ctx.fillStyle = '#161b22';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    // Render Time with Rigid Font System to Prevent Text Shifting
-    ctx.fillStyle = '#58a6ff';
-    ctx.font = '700 62px ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(`${hh}:${mm}:${ss}:${ff}`, canvas.width / 2, canvas.height / 2 - 10);
-
-    ctx.fillStyle = '#8b949e';
-    ctx.font = '16px -apple-system, sans-serif';
-    ctx.fillText('HKT (UTC+8) • 60 FPS Engine', canvas.width / 2, canvas.height / 2 + 55);
-
-    requestAnimationFrame(render);
-  }
-
-  // 3. Initialize Background Media Stream for PiP
-  async function initStream() {
-    try {
-      if (!isStreamReady) {
-        const stream = canvas.captureStream(60);
-        video.srcObject = stream;
-        await video.play();
-        isStreamReady = true;
-      }
-    } catch (e) {
-      console.warn("Stream init waiting for user action:", e);
+    h1 {
+      font-size: 1.2rem;
+      color: #8b949e;
+      margin-bottom: 20px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
     }
-  }
+    canvas {
+      width: 100%;
+      max-width: 480px;
+      height: auto;
+      border-radius: 16px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+      background: #161b22;
+      display: block;
+    }
+    .controls {
+      margin-top: 30px;
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+    button {
+      background: #238636;
+      color: white;
+      border: none;
+      padding: 14px 24px;
+      font-size: 1rem;
+      font-weight: 600;
+      border-radius: 12px;
+      cursor: pointer;
+      box-shadow: 0 4px 12px rgba(35, 134, 54, 0.3);
+    }
+    button.sync {
+      background: #1f6feb;
+      box-shadow: 0 4px 12px rgba(31, 111, 235, 0.3);
+    }
+    /* iOS Offscreen Video Element */
+    video {
+      width: 1px;
+      height: 1px;
+      opacity: 0.01;
+      position: absolute;
+      top: -9999px;
+      left: -9999px;
+      pointer-events: none;
+    }
+    .status {
+      margin-top: 15px;
+      font-size: 0.85rem;
+      color: #8b949e;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
 
-  async function togglePiP() {
-    try {
-      if (!isStreamReady || video.paused) {
-        await initStream();
+  <h1>HK Time Sync Clock</h1>
+  
+  <canvas id="timerCanvas" width="600" height="300"></canvas>
+  <video id="pipVideo" autoplay playsinline muted></video>
+
+  <div class="controls">
+    <button class="sync" onclick="syncHKTime()">Sync HKO Time</button>
+    <button onclick="togglePiP()">Open Picture-in-Picture</button>
+  </div>
+  
+  <div class="status" id="statusLog">Starting clock engine...</div>
+
+  <script>
+    const canvas = document.getElementById('timerCanvas');
+    const ctx = canvas.getContext('2d');
+    const video = document.getElementById('pipVideo');
+    const statusLog = document.getElementById('statusLog');
+
+    let timeOffsetMs = 0;
+    let isStreamReady = false;
+
+    // 1. High-Precision Time Sync Engine
+    async function syncHKTime() {
+      statusLog.innerText = "Calibrating time sync with server...";
+      const endpoint = 'https://worldtimeapi.org/api/timezone/Asia/Hong_Kong'; 
+      const samples = [];
+      const NUM_SAMPLES = 3;
+
+      for (let i = 0; i < NUM_SAMPLES; i++) {
+        try {
+          const t0 = performance.now();
+          const response = await fetch(`${endpoint}?t=${Date.now()}_${i}`, { cache: "no-store" });
+          if (!response.ok) throw new Error("HTTP response error");
+          
+          const t1 = performance.now();
+          const data = await response.json();
+
+          const serverTime = new Date(data.datetime).getTime();
+          const rtt = t1 - t0;
+          const latency = rtt / 2;
+
+          samples.push({
+            offset: (serverTime + latency) - Date.now(),
+            rtt: rtt
+          });
+        } catch (err) {
+          console.warn("Sample attempt failed:", err);
+        }
+        await new Promise(res => setTimeout(res, 50));
       }
 
-      if (document.pictureInPictureElement) {
-        await document.exitPictureInPicture();
+      if (samples.length > 0) {
+        samples.sort((a, b) => a.rtt - b.rtt);
+        const bestSample = samples[0];
+        timeOffsetMs = bestSample.offset;
+        statusLog.innerText = `Synced! Latency RTT: ${bestSample.rtt.toFixed(1)}ms | Offset: ${timeOffsetMs.toFixed(1)}ms`;
       } else {
-        await video.requestPictureInPicture();
+        statusLog.innerText = "Network sync failed. Running on local system clock.";
       }
-    } catch (err) {
-      statusLog.innerText = "PiP Error: " + err.message;
     }
-  }
 
-  // Start System Loop
-  render();
-  syncHKTime();
-  initStream();
-</script>
+    // 2. Continuous 60 FPS Render Loop
+    function render() {
+      const exactNowMs = Date.now() + timeOffsetMs;
+      const now = new Date(exactNowMs);
+
+      const hh = String(now.getHours()).padStart(2, '0');
+      const mm = String(now.getMinutes()).padStart(2, '0');
+      const ss = String(now.getSeconds()).padStart(2, '0');
+      
+      const ms = now.getMilliseconds();
+      const frameNumber = Math.floor(ms / (1000 / 60)); 
+      const ff = String(Math.min(59, Math.max(0, frameNumber))).padStart(2, '0');
+
+      // Clear Canvas Background
+      ctx.fillStyle = '#161b22';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Main Digital Clock Format
+      ctx.fillStyle = '#58a6ff';
+      ctx.font = 'bold 58px Courier, Courier New, monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(`${hh}:${mm}:${ss}:${ff}`, canvas.width / 2, canvas.height / 2 - 10);
+
+      // Secondary Text Frame
+      ctx.fillStyle = '#8b949e';
+      ctx.font = '16px -apple-system, sans-serif';
+      ctx.fillText('HKT (UTC+8) • 60 FPS Engine', canvas.width / 2, canvas.height / 2 + 55);
+
+      requestAnimationFrame(render);
+    }
+
+    // 3. Initialize Video Stream Engine
+    async function initStream() {
+      try {
+        if (!isStreamReady) {
+          const stream = canvas.captureStream(60);
+          video.srcObject = stream;
+          await video.play();
+          isStreamReady = true;
+        }
+      } catch (e) {
+        console.warn("Stream awaiting user gesture:", e);
+      }
+    }
+
+    // 4. Picture-in-Picture Control
+    async function togglePiP() {
+      try {
+        if (!isStreamReady || video.paused) {
+          await initStream();
+        }
+
+        if (document.pictureInPictureElement) {
+          await document.exitPictureInPicture();
+        } else {
+          await video.requestPictureInPicture();
+        }
+      } catch (err) {
+        statusLog.innerText = "PiP Error: " + err.message;
+      }
+    }
+
+    // Start rendering immediately
+    render();
+    initStream();
+    syncHKTime();
+  </script>
+</body>
+</html>
