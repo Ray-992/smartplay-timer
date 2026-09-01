@@ -74,7 +74,7 @@
       box-shadow: 0 4px 12px rgba(210, 153, 34, 0.3);
     }
     
-    /* Layout-active video element for iOS PiP hardware compositing */
+    /* Layout-active video element required for iOS PiP hardware compositing */
     video#pipVideo {
       position: absolute;
       top: 0;
@@ -120,51 +120,86 @@
     let timeOffsetMs = 0;
     let isStreamReady = false;
 
-    // Test capture state variables
+    // Test timestamp capture state variables
     let capturedTimeString = null;
     let testClearTimeout = null;
 
-    // 1. Precise Time Sync Engine
+    // 1. Multi-Endpoint Time Sync Engine (Resilient Network Calibration)
     async function syncHKTime() {
-      statusLog.innerText = "Calibrating time sync with server...";
-      const endpoint = 'https://worldtimeapi.org/api/timezone/Asia/Hong_Kong'; 
-      const samples = [];
-      const NUM_SAMPLES = 3;
+      statusLog.innerText = "Calibrating time sync with primary server...";
 
-      for (let i = 0; i < NUM_SAMPLES; i++) {
-        try {
-          const t0 = performance.now();
-          const response = await fetch(`${endpoint}?t=${Date.now()}_${i}`, { cache: "no-store" });
-          if (!response.ok) throw new Error("Network error");
-          
-          const t1 = performance.now();
-          const data = await response.json();
-
-          const serverTime = new Date(data.datetime).getTime();
-          const rtt = t1 - t0;
-          const latency = rtt / 2;
-
-          samples.push({
-            offset: (serverTime + latency) - Date.now(),
-            rtt: rtt
-          });
-        } catch (err) {
-          console.warn("Sample attempt failed:", err);
+      const endpoints = [
+        {
+          name: "WorldTimeAPI",
+          url: "https://worldtimeapi.org/api/timezone/Asia/Hong_Kong",
+          parse: (data) => new Date(data.datetime).getTime()
+        },
+        {
+          name: "TimeAPI.io",
+          url: "https://timeapi.io/api/time/current/zone?timeZone=Asia/Hong_Kong",
+          parse: (data) => new Date(data.dateTime).getTime()
+        },
+        {
+          name: "Cloudflare Server Time",
+          url: "https://1.1.1.1/cdn-cgi/trace",
+          parseText: (text) => {
+            const match = text.match(/ts=(\d+\.\d+|\d+)/);
+            return match ? parseFloat(match[1]) * 1000 : null;
+          }
         }
-        await new Promise(res => setTimeout(res, 50));
+      ];
+
+      for (const api of endpoints) {
+        const samples = [];
+        const NUM_SAMPLES = 2;
+
+        for (let i = 0; i < NUM_SAMPLES; i++) {
+          try {
+            const t0 = performance.now();
+            const response = await fetch(`${api.url}${api.url.includes('?') ? '&' : '?'}_t=${Date.now()}_${i}`, {
+              cache: "no-store"
+            });
+            
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const t1 = performance.now();
+
+            let serverTime = null;
+            if (api.parseText) {
+              const text = await response.text();
+              serverTime = api.parseText(text);
+            } else {
+              const data = await response.json();
+              serverTime = api.parse(data);
+            }
+
+            if (!serverTime) throw new Error("Invalid payload format");
+
+            const rtt = t1 - t0;
+            const latency = rtt / 2;
+
+            samples.push({
+              offset: (serverTime + latency) - Date.now(),
+              rtt: rtt
+            });
+          } catch (err) {
+            console.warn(`[Sync] ${api.name} sample ${i + 1} failed:`, err.message);
+          }
+          await new Promise(res => setTimeout(res, 40));
+        }
+
+        if (samples.length > 0) {
+          samples.sort((a, b) => a.rtt - b.rtt);
+          const bestSample = samples[0];
+          timeOffsetMs = bestSample.offset;
+          statusLog.innerText = `Synced via ${api.name}! RTT: ${bestSample.rtt.toFixed(1)}ms | Offset: ${timeOffsetMs.toFixed(1)}ms`;
+          return;
+        }
       }
 
-      if (samples.length > 0) {
-        samples.sort((a, b) => a.rtt - b.rtt);
-        const bestSample = samples[0];
-        timeOffsetMs = bestSample.offset;
-        statusLog.innerText = `Synced! Latency RTT: ${bestSample.rtt.toFixed(1)}ms | Offset: ${timeOffsetMs.toFixed(1)}ms`;
-      } else {
-        statusLog.innerText = "Network sync failed. Running on local system clock.";
-      }
+      statusLog.innerText = "Network sync blocked/failed. Running on local device clock.";
     }
 
-    // 2. Capture Exact Click Timestamp for 5 Seconds
+    // 2. Capture Click Timestamp for 5 Seconds
     function captureTestTimestamp() {
       const clickTimeMs = Date.now() + timeOffsetMs;
       const clickedDate = new Date(clickTimeMs);
@@ -177,7 +212,6 @@
       capturedTimeString = `${hh}:${mm}:${ss}:${ms}`;
       statusLog.innerText = `Captured Click Time: ${capturedTimeString}`;
 
-      // Reset timer if clicked again within 5s
       if (testClearTimeout) clearTimeout(testClearTimeout);
 
       testClearTimeout = setTimeout(() => {
@@ -186,7 +220,7 @@
       }, 5000);
     }
 
-    // 3. Continuous Render Loop
+    // 3. Render Loop (HH:MM:SS:SSS + Red Alert Window)
     function render() {
       const exactNowMs = Date.now() + timeOffsetMs;
       const now = new Date(exactNowMs);
@@ -194,15 +228,15 @@
       const secondsNum = now.getSeconds();
       const msNum = now.getMilliseconds();
       
-      // Check for 5-second red alert window starting at xx:mm:59:500
+      // Check 5-second red alert window starting at xx:mm:59:500
       const isRedAlert = (secondsNum === 59 && msNum >= 500) || (secondsNum < 4) || (secondsNum === 4 && msNum < 500);
 
-      // Clear Canvas Background
+      // Clear Canvas Frame
       ctx.fillStyle = '#161b22';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
       if (capturedTimeString) {
-        // --- DISPLAY FROZEN TEST TIMESTAMP ---
+        // Render Frozen Test Timestamp
         ctx.strokeStyle = '#d29922';
         ctx.lineWidth = 6;
         ctx.strokeRect(4, 4, canvas.width - 8, canvas.height - 8);
@@ -218,7 +252,7 @@
         ctx.fillText('TIMESTAMP CAPTURED (5s HOLD)', canvas.width / 2, canvas.height / 2 + 55);
 
       } else {
-        // --- DISPLAY LIVE SYNCHRONIZED CLOCK ---
+        // Render Live Clock
         const hh = String(now.getHours()).padStart(2, '0');
         const mm = String(now.getMinutes()).padStart(2, '0');
         const ss = String(now.getSeconds()).padStart(2, '0');
@@ -246,7 +280,7 @@
       requestAnimationFrame(render);
     }
 
-    // 4. Initialize Media Stream Pipeline
+    // 4. Media Stream Pipeline Initialization
     async function initStream() {
       try {
         if (!isStreamReady) {
@@ -256,7 +290,7 @@
           isStreamReady = true;
         }
       } catch (e) {
-        console.warn("Stream init waiting for user gesture:", e);
+        console.warn("Stream init waiting for user action:", e);
       }
     }
 
@@ -277,7 +311,7 @@
       }
     }
 
-    // Start engine immediately
+    // Execution sequence
     render();
     initStream();
     syncHKTime();
