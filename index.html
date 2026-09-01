@@ -124,7 +124,7 @@
     let capturedTimeString = null;
     let testClearTimeout = null;
 
-    // 1. Multi-Endpoint Time Sync Engine (Resilient Network Calibration)
+    // 1. Multi-Endpoint Time Sync Engine
     async function syncHKTime() {
       statusLog.innerText = "Calibrating time sync with primary server...";
 
@@ -220,7 +220,7 @@
       }, 5000);
     }
 
-    // 3. Render Loop (HH:MM:SS:SSS + Red Alert Window)
+    // 3. Render Loop (Triggers red alert starting at xx:mm:59:200 for 5 seconds)
     function render() {
       const exactNowMs = Date.now() + timeOffsetMs;
       const now = new Date(exactNowMs);
@@ -228,8 +228,12 @@
       const secondsNum = now.getSeconds();
       const msNum = now.getMilliseconds();
       
-      // Check 5-second red alert window starting at xx:mm:59:500
-      const isRedAlert = (secondsNum === 59 && msNum >= 500) || (secondsNum < 4) || (secondsNum === 4 && msNum < 500);
+      // RED ALERT WINDOW:
+      // Starts at 59s 200ms and runs for 5,000ms total:
+      // (1) Current minute: 59s >= 200ms
+      // (2) Next minute: 0s, 1s, 2s, 3s (all milliseconds)
+      // (3) Next minute: 4s < 200ms
+      const isRedAlert = (secondsNum === 59 && msNum >= 200) || (secondsNum < 4) || (secondsNum === 4 && msNum < 200);
 
       // Clear Canvas Frame
       ctx.fillStyle = '#161b22';
