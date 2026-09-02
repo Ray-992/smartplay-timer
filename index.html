@@ -54,7 +54,7 @@
       background: #238636;
       color: white;
       border: none;
-      padding: 12px 20px;
+      padding: 12px 18px;
       font-size: 0.95rem;
       font-weight: 600;
       border-radius: 12px;
@@ -73,8 +73,12 @@
       background: #d29922;
       box-shadow: 0 4px 12px rgba(210, 153, 34, 0.3);
     }
+    button.alert-btn {
+      background: #8957e5;
+      box-shadow: 0 4px 12px rgba(137, 87, 229, 0.3);
+    }
     
-    /* Layout-active video element required for iOS PiP hardware compositing */
+    /* Video container required for iOS PiP compositing */
     video#pipVideo {
       position: absolute;
       top: 0;
@@ -93,6 +97,74 @@
       text-align: center;
       z-index: 2;
     }
+
+    /* Modal Overlay Styles */
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.7);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 10;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s ease;
+    }
+    .modal-overlay.active {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .modal {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 16px;
+      padding: 24px;
+      width: 90%;
+      max-width: 360px;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.6);
+    }
+    .modal h2 {
+      font-size: 1.1rem;
+      color: #f0f6fc;
+      margin-bottom: 16px;
+    }
+    .field-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-bottom: 14px;
+      text-align: left;
+    }
+    .field-group label {
+      font-size: 0.8rem;
+      color: #8b949e;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+    .field-group input {
+      background: #0d1117;
+      border: 1px solid #30363d;
+      color: #f0f6fc;
+      padding: 10px 12px;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-family: monospace;
+    }
+    .modal-actions {
+      display: flex;
+      gap: 10px;
+      margin-top: 20px;
+      justify-content: flex-end;
+    }
+    .modal-actions button.cancel {
+      background: #21262d;
+      box-shadow: none;
+      color: #c9d1d9;
+    }
   </style>
 </head>
 <body>
@@ -105,11 +177,35 @@
 
   <div class="controls">
     <button class="test" onclick="captureTestTimestamp()">Capture Time (5s)</button>
+    <button class="alert-btn" onclick="openAlertModal()">Set Alert</button>
     <button class="sync" onclick="syncHKTime()">Sync HKO Time</button>
     <button onclick="togglePiP()">Open Picture-in-Picture</button>
   </div>
   
   <div class="status" id="statusLog">Starting clock engine...</div>
+
+  <!-- Set Alert Config Modal -->
+  <div class="modal-overlay" id="alertModal">
+    <div class="modal">
+      <h2>Configure Red Alert</h2>
+      <div class="field-group">
+        <label>Start Second (0 - 59)</label>
+        <input type="number" id="alertSecondInput" min="0" max="59" value="59">
+      </div>
+      <div class="field-group">
+        <label>Start Millisecond (0 - 999)</label>
+        <input type="number" id="alertMsInput" min="0" max="999" value="200">
+      </div>
+      <div class="field-group">
+        <label>Duration (Seconds)</label>
+        <input type="number" id="alertDurationInput" min="1" max="30" value="5">
+      </div>
+      <div class="modal-actions">
+        <button class="cancel" onclick="closeAlertModal()">Cancel</button>
+        <button onclick="saveAlertConfig()">Save Settings</button>
+      </div>
+    </div>
+  </div>
 
   <script>
     const canvas = document.getElementById('timerCanvas');
@@ -119,6 +215,11 @@
 
     let timeOffsetMs = 0;
     let isStreamReady = false;
+
+    // Default Alert Settings: Start at xx:mm:59:200 for 5.0 seconds
+    let alertSecond = 59;
+    let alertMs = 200;
+    let alertDurationSec = 5;
 
     // Test timestamp capture state variables
     let capturedTimeString = null;
@@ -199,7 +300,33 @@
       statusLog.innerText = "Network sync blocked/failed. Running on local device clock.";
     }
 
-    // 2. Capture Click Timestamp for 5 Seconds
+    // 2. Alert Modal Handlers
+    function openAlertModal() {
+      document.getElementById('alertSecondInput').value = alertSecond;
+      document.getElementById('alertMsInput').value = alertMs;
+      document.getElementById('alertDurationInput').value = alertDurationSec;
+      document.getElementById('alertModal').classList.add('active');
+    }
+
+    function closeAlertModal() {
+      document.getElementById('alertModal').classList.remove('active');
+    }
+
+    function saveAlertConfig() {
+      const sec = parseInt(document.getElementById('alertSecondInput').value, 10);
+      const ms = parseInt(document.getElementById('alertMsInput').value, 10);
+      const dur = parseFloat(document.getElementById('alertDurationInput').value);
+
+      if (!isNaN(sec) && sec >= 0 && sec <= 59) alertSecond = sec;
+      if (!isNaN(ms) && ms >= 0 && ms <= 999) alertMs = ms;
+      if (!isNaN(dur) && dur > 0) alertDurationSec = dur;
+
+      closeAlertModal();
+      const msPadded = String(alertMs).padStart(3, '0');
+      statusLog.innerText = `Alert set to xx:mm:${String(alertSecond).padStart(2, '0')}:${msPadded} (${alertDurationSec}s duration)`;
+    }
+
+    // 3. Capture Click Timestamp for 5 Seconds
     function captureTestTimestamp() {
       const clickTimeMs = Date.now() + timeOffsetMs;
       const clickedDate = new Date(clickTimeMs);
@@ -220,22 +347,26 @@
       }, 5000);
     }
 
-    // 3. Render Loop (Triggers red alert starting at xx:mm:59:200 for 5 seconds)
+    // 4. Render Loop with Dynamic Red Alert Detection
     function render() {
       const exactNowMs = Date.now() + timeOffsetMs;
       const now = new Date(exactNowMs);
 
-      const secondsNum = now.getSeconds();
-      const msNum = now.getMilliseconds();
+      // Compute millisecond offset relative to the start of the current minute (0..59999ms)
+      const currentMinuteMs = (now.getSeconds() * 1000) + now.getMilliseconds();
       
-      // RED ALERT WINDOW:
-      // Starts at 59s 200ms and runs for 5,000ms total:
-      // (1) Current minute: 59s >= 200ms
-      // (2) Next minute: 0s, 1s, 2s, 3s (all milliseconds)
-      // (3) Next minute: 4s < 200ms
-      const isRedAlert = (secondsNum === 59 && msNum >= 200) || (secondsNum < 4) || (secondsNum === 4 && msNum < 200);
+      // Calculate configured alert start time within the minute
+      const alertStartMs = (alertSecond * 1000) + alertMs;
+      const alertDurationMs = alertDurationSec * 1000;
 
-      // Clear Canvas Frame
+      // Evaluate alert state considering minute wraparounds
+      let isRedAlert = false;
+      const deltaMs = (currentMinuteMs - alertStartMs + 60000) % 60000;
+      if (deltaMs < alertDurationMs) {
+        isRedAlert = true;
+      }
+
+      // Clear Canvas Background
       ctx.fillStyle = '#161b22';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
@@ -284,7 +415,7 @@
       requestAnimationFrame(render);
     }
 
-    // 4. Media Stream Pipeline Initialization
+    // 5. Media Stream Pipeline Initialization
     async function initStream() {
       try {
         if (!isStreamReady) {
@@ -298,7 +429,7 @@
       }
     }
 
-    // 5. Picture-in-Picture Control
+    // 6. Picture-in-Picture Control
     async function togglePiP() {
       try {
         if (!isStreamReady || video.paused) {
